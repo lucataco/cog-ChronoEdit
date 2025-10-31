@@ -1,0 +1,25 @@
+# Core PyTorch stack
+torch==2.7.1
+torchvision==0.22.1
+
+# Diffusion pipeline dependencies
+diffusers==0.35.2
+transformers==4.57.1
+accelerate==1.8.1
+peft==0.17.1
+safetensors>=0.4.3
+einops==0.8.1
+regex==2024.11.6
+ftfy==6.3.1
+xfuser==0.4.4
+sentencepiece==0.2.0
+tokenizers==0.22
+
+# Prompt enhancer
+qwen-vl-utils==0.0.14
+
+# Utilities
+numpy==1.26.4
+pillow==11.1.0
+tqdm==4.67.1
+huggingface-hub>=0.25.0
