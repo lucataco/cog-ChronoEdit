@@ -1,16 +1,19 @@
 """Cog predictor for NVIDIA ChronoEdit with 8-step distillation LoRA."""
 
 import math
+import os
+import subprocess
 import tempfile
+import time
 from pathlib import Path
 from typing import Optional
 
 import numpy as np
 import torch
+from PIL import Image
 from cog import BasePredictor, Input, Path as CogPath
 from diffusers import AutoencoderKLWan, UniPCMultistepScheduler
 from huggingface_hub import snapshot_download
-from PIL import Image
 from transformers import CLIPProcessor, CLIPVisionModel
 
 from chronoedit_diffusers.pipeline_chronoedit import ChronoEditPipeline
@@ -24,16 +27,24 @@ MAX_AREA = 720 * 1280
 NUM_FRAMES = 5
 CACHE_ROOT = Path(__file__).resolve().parent / "checkpoints"
 MODEL_CACHE_DIR = CACHE_ROOT / "ChronoEdit-14B-Diffusers"
+MODEL_URL = "https://weights.replicate.delivery/default/nvidia/ChronoEdit-14B-Diffusers/model.tar"
 
 
 def _calculate_dimensions(image: Image.Image, mod_value: int) -> tuple[int, int]:
     aspect_ratio = image.height / image.width
     width = int(round(math.sqrt(MAX_AREA / aspect_ratio)))
     height = int(round(width * aspect_ratio))
-
     width = max(mod_value, width // mod_value * mod_value)
     height = max(mod_value, height // mod_value * mod_value)
     return width, height
+
+
+def download_weights(url, dest):
+    start = time.time()
+    print("downloading url: ", url)
+    print("downloading to: ", dest)
+    subprocess.check_call(["pget", "-xf", url, dest], close_fds=False)
+    print("downloading took: ", time.time() - start)
 
 
 class Predictor(BasePredictor):
@@ -46,35 +57,36 @@ class Predictor(BasePredictor):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         dtype = torch.bfloat16 if self.device.type == "cuda" else torch.float32
 
-        model_path = self._ensure_model_repo()
-        model_path_str = str(model_path)
+        model_path = MODEL_CACHE_DIR
+        if not os.path.exists(MODEL_CACHE_DIR):
+            download_weights(MODEL_URL, MODEL_CACHE_DIR)
 
         image_encoder = CLIPVisionModel.from_pretrained(
-            model_path_str,
+            model_path,
             subfolder="image_encoder",
             torch_dtype=torch.float32,
         )
 
         clip_processor = CLIPProcessor.from_pretrained(
-            model_path_str,
+            model_path,
             subfolder="image_processor",
             use_fast=False,
         )
 
         vae = AutoencoderKLWan.from_pretrained(
-            model_path_str,
+            model_path,
             subfolder="vae",
             torch_dtype=dtype,
         )
 
         transformer = ChronoEditTransformer3DModel.from_pretrained(
-            model_path_str,
+            model_path,
             subfolder="transformer",
             torch_dtype=dtype,
         )
 
         self.pipe = ChronoEditPipeline.from_pretrained(
-            model_path_str,
+            model_path,
             image_encoder=image_encoder,
             image_processor=clip_processor,
             transformer=transformer,
@@ -98,20 +110,6 @@ class Predictor(BasePredictor):
 
         self.prompt_model = None
         self.prompt_processor = None
-
-    @staticmethod
-    def _ensure_model_repo() -> Path:
-        CACHE_ROOT.mkdir(parents=True, exist_ok=True)
-
-        if MODEL_CACHE_DIR.exists():
-            return MODEL_CACHE_DIR
-
-        snapshot_download(
-            repo_id=MODEL_ID,
-            local_dir=str(MODEL_CACHE_DIR),
-        )
-
-        return MODEL_CACHE_DIR
 
     def _ensure_prompt_enhancer(self) -> None:
         if self.prompt_model is None or self.prompt_processor is None:
